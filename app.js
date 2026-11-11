@@ -1,5 +1,6 @@
 import { CUTOFF, NOTICE, SUBJECTS, buildQueue, cleanRecords, fieldStat, fieldsOf, recordAnswer, subjectName, subjectStats, toggleFlag } from './stats.js';
 import { resolvePage } from './route.js';
+import { dotText } from './dotfont.js';
 import { LoadError, errorMessage } from './messages.js';
 
 const RECORDS_KEY = 'studyotsu4.v1';
@@ -70,6 +71,14 @@ export async function loadQuestions() {
     Array.isArray(q.choices) && q.choices.length === 4 && Number.isInteger(q.answer) && q.answer >= 0 && q.answer <= 3);
 }
 
+// 深緑の帯。pill は右上の丸い印（HTML）。subText はドット文字の小さい行
+function hero(subText, pill = '') {
+  return `<header class="hero">
+    <div><span class="t">${dotText('STUDY OTSU4', 28)}</span><span class="s">${dotText(subText, 10)}</span></div>
+    ${pill}
+  </header>`;
+}
+
 // 画面の上に常に出す注意書き
 function noticeBar() {
   return `<p class="notice" id="ai-notice" role="note">${esc(NOTICE)}</p>`;
@@ -80,7 +89,7 @@ function storageNotice() {
 }
 
 function renderError(error) {
-  app.innerHTML = `${noticeBar()}<div class="card narrow">
+  app.innerHTML = `${hero('ERROR')}${noticeBar()}<div class="card narrow">
     <h1>読み込めませんでした</h1>
     <p>${esc(errorMessage(error))}</p>
     <button class="primary full" id="reload">再読み込み</button>
@@ -89,14 +98,15 @@ function renderError(error) {
 }
 
 function statTile(label, stat, attr = '') {
-  const value = stat.rate === null ? '—' : Math.round(stat.rate * 100);
-  const unit = stat.rate === null ? '' : '<span class="unit">%</span>';
+  const pct = stat.rate === null ? null : Math.round(stat.rate * 100);
+  const num = pct === null ? dotText('-', 32, 'まだ記録なし') : dotText(`${pct}%`, 32, `正答率 ${pct}パーセント`);
   const note = stat.rate === null ? 'まだ解いていません'
     : stat.belowCutoff ? `目安の${Math.round(CUTOFF * 100)}%を下回っています（${stat.attempts}回）` : `${stat.attempts}回解答`;
   const tag = attr ? 'button' : 'div';
   return `<${tag} class="card tile ${stat.belowCutoff ? 'warn' : ''}" ${attr}>
     <div class="label">${esc(label)}</div>
-    <div class="value">${value}${unit}</div>
+    <div class="num">${num}</div>
+    <progress class="bar" max="100" value="${pct ?? 0}" aria-hidden="true"></progress>
     <div class="state">${esc(note)}</div>
   </${tag}>`;
 }
@@ -112,12 +122,12 @@ function renderHome() {
   const stats = subjectStats(state.records, state.questions);
   const inKind = state.questions.filter((q) => q.subject === kind);
   const wrongCount = inKind.filter((q) => state.records[q.id]?.last === false).length;
-  app.innerHTML = `${noticeBar()}${storageNotice()}
-    <h1>Study OTSU4</h1>
+  const pill = `<span class="pill">${dotText(`${inKind.length}Q`, 12, `${inKind.length}問`)}<span class="pill-jp">${esc(info.name)}</span></span>`;
+  app.innerHTML = `${hero('HAZMAT CLASS 4', pill)}${noticeBar()}${storageNotice()}
     <p class="sub">乙種第4類危険物取扱者。各科目${Math.round(CUTOFF * 100)}%以上が合格の目安です</p>
     <div class="chips kinds" role="group" aria-label="科目">${Object.entries(SUBJECTS).map(([k, s]) =>
       `<button type="button" class="chip kind ${k === kind ? 'on' : ''}" data-kind="${k}" aria-pressed="${k === kind}">${esc(s.name)}</button>`).join('')}</div>
-    <div class="card" style="margin-bottom:16px">
+    <div class="card gap">
       <h2>${esc(info.name)}（1回${info.count}問）</h2>
       <p class="sub">登録されている問題：${inKind.length}問${inKind.length < info.count ? '（1回分に足りないので、ある分だけ出します）' : ''}</p>
       <div class="row">
@@ -131,8 +141,7 @@ function renderHome() {
     <h2>科目ごとの正答率</h2>
     <div class="bento">
       ${Object.entries(SUBJECTS).map(([k, s]) => statTile(s.name, stats.bySubject[k])).join('')}
-    </div>
-    ${state.flags.length ? `<div class="card">
+    </div>    ${state.flags.length ? `<div class="card">
       <h2>要確認の印をつけた解説</h2>
       <ul class="wrong-list">${state.flags.map((id) => `<li>${esc(flagLabel(id))}</li>`).join('')}</ul>
     </div>` : ''}`;
@@ -169,15 +178,22 @@ function beginQuiz(queue, subject) {
 
 function renderQuiz() {
   const q = state.queue[state.index];
-  app.innerHTML = `${noticeBar()}<div class="qhead">
-      <span class="sub">${esc(subjectName(q.subject))}・${state.index + 1} / ${state.queue.length}・${esc(q.field)}</span>
-      <button class="secondary" id="quit">終わる</button>
+  const n = state.index + 1;
+  const total = state.queue.length;
+  app.innerHTML = `<div class="qbar">
+      <div class="qhead">
+        <span class="qcount">${dotText(`${n}/${total}`, 24, `${total}問中 ${n}問目`)}</span>
+        <button class="secondary" id="quit">終わる</button>
+      </div>
+      <progress class="bar" max="${total}" value="${n}" aria-hidden="true"></progress>
     </div>
+    <p class="qmeta">${esc(subjectName(q.subject))}・${esc(q.field)}</p>
+    ${noticeBar()}
     ${storageNotice()}
     ${q.sure === false ? '<p class="notice" id="unsure">自信なし：この問題はAIの確信が低めです。公式の問題集や教科書で確かめてください。</p>' : ''}
-    <div class="card" style="margin-bottom:16px"><p style="margin:0;white-space:pre-line">${esc(q.question)}</p></div>
-    <div class="choices" style="grid-template-columns:1fr">${q.choices.map((c, i) =>
-      `<button class="choice" style="text-align:left;padding:12px 16px;font-size:var(--fs-body);font-weight:500" data-choice="${i}">${i + 1}. ${esc(c)}</button>`).join('')}</div>
+    <div class="card gap"><p class="qtext">${esc(q.question)}</p></div>
+    <div class="choices list">${q.choices.map((c, i) =>
+      `<button class="choice text" data-choice="${i}">${i + 1}. ${esc(c)}</button>`).join('')}</div>
     <div id="after"></div>`;
   state.readyAt = performance.now() + TAP_GUARD_MS;
   document.getElementById('quit').onclick = showResult;
@@ -211,7 +227,8 @@ function answer(choice) {
   });
   const text = correct ? '正解' : `不正解（正解は ${q.answer + 1}. ${q.choices[q.answer]}）`;
   const last = state.index + 1 >= state.queue.length;
-  document.getElementById('after').innerHTML = `<p class="feedback ${correct ? '' : 'ng'}" role="status">${esc(text)}</p>
+  const mark = correct ? dotText('OK', 24, '') : dotText('NG', 24, '');
+  document.getElementById('after').innerHTML = `<p class="feedback ${correct ? '' : 'ng'}" role="status">${mark}<span>${esc(text)}</span></p>
     ${explanationHtml(q)}
     <button class="primary full" id="next">${last ? '結果を見る' : '次へ'}</button>`;
   const flag = document.getElementById('flag');
@@ -245,10 +262,11 @@ function renderResult() {
   const pass = rate !== null && rate >= Math.round(CUTOFF * 100);
   const stats = subjectStats(state.records, state.questions);
   const pct = Math.round(CUTOFF * 100);
-  app.innerHTML = `${noticeBar()}<div class="bento">
-      <div class="card tile span-2"><div class="label">今回の正答率（${esc(subjectName(state.subject))}）</div><div class="value">${rate ?? '—'}<span class="unit">${rate === null ? '' : '%'}</span></div>
+  const rateNum = rate === null ? dotText('-', 40, '採点なし') : dotText(`${rate}%`, 40, `正答率 ${rate}パーセント`);
+  app.innerHTML = `${hero('RESULT')}${noticeBar()}<div class="bento">
+      <div class="card tile dark span-2"><div class="label">今回の正答率（${esc(subjectName(state.subject))}）</div><div class="num">${rateNum}</div>
         <div class="state">${rate === null ? '' : pass ? `${pct}%以上：合格の目安をクリア` : `${pct}%未満：合格の目安まであと少し`}</div></div>
-      <div class="card tile span-2"><div class="label">正解数</div><div class="value">${correct}<span class="unit"> / ${total}問</span></div></div>
+      <div class="card tile span-2"><div class="label">正解数</div><div class="num">${dotText(`${correct}/${total}`, 40, `${total}問中 ${correct}問正解`)}</div></div>
     </div>
     <h2>科目ごとの正答率（これまでの合計）</h2>
     <div class="bento">${Object.entries(SUBJECTS).map(([k, s]) => statTile(s.name, stats.bySubject[k])).join('')}</div>
